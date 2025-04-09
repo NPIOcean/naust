@@ -6,7 +6,7 @@ Maintained by the Oceanography section at the [Norwegian Polar Institute](https:
 
 The idea is more in-house specific things can live here, but more truly general stuff can live in [kval](github.com/NPIOcean/kval)
 
-Example of things to påut here:
+Example of things to put here:
 
 - Parsers for specific file formats.
 - NPI-specific metadata fixing.
