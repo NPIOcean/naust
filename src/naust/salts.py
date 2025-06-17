@@ -17,6 +17,8 @@ import ipywidgets as widgets
 from IPython.display import display
 from matplotlib.ticker import MaxNLocator
 import matplotlib.lines as mlines
+import mplcursors
+from scipy.stats import pearsonr
 
 def read_salts_sheet(xlsx_file: str | Path) -> pd.DataFrame:
     """
@@ -115,17 +117,20 @@ def merge_salts_sheet_and_log(
     containing salinity final values and related metadata.
 
     Parameters:
-        df_salts (pd.DataFrame): Salinometer readings DataFrame (with 'Sample', 'S_final', etc).
-        df_log (pd.DataFrame): Cruise log DataFrame (with 'sample_number', 'STATION', 'NISKIN_NUMBER', etc).
+        df_salts (pd.DataFrame): Salinometer readings DataFrame (with 'Sample',
+        'S_final', etc). df_log (pd.DataFrame): Cruise log DataFrame (with
+        'sample_number', 'STATION', 'NISKIN_NUMBER', etc).
 
     Returns:
         xr.Dataset: Dataset with dimensions STATION and NISKIN_NUMBER.
 
     Raises:
-        ValueError: If required columns are missing or merge results empty DataFrame.
+        ValueError: If required columns are missing or merge results empty
+        DataFrame.
     '''
     required_salts_cols = {'Sample', 'S_final', 'Note'}
-    required_log_cols = {'sample_number', 'STATION', 'NISKIN_NUMBER', 'intended_sampling_depth', 'Sampling date (UTC)'}
+    required_log_cols = {'sample_number', 'STATION', 'NISKIN_NUMBER',
+                         'intended_sampling_depth', 'Sampling date (UTC)'}
 
     missing_salts = required_salts_cols - set(df_salts.columns)
     missing_log = required_log_cols - set(df_log.columns)
@@ -162,6 +167,9 @@ def merge_salts_sheet_and_log(
 
     ds_merged = xr.Dataset.from_dataframe(df_merged)
 
+
+    # Rename S_final to PSAL_LAB
+    ds_merged = ds_merged.rename_vars({'S_final': 'PSAL_LAB'})
     return ds_merged
 
 
@@ -200,16 +208,17 @@ def merge_all_salts_with_btl(
             ds_combined_full[var] = ds_combined_full[var].transpose('STATION', 'NISKIN_NUMBER')
 
     # Check necessary variables exist before computing differences
-    if all(x in ds_combined_full.data_vars for x in ['PSAL1', 'S_final']):
-        ds_combined_full['Sdiff1'] = ds_combined_full['PSAL1'] - ds_combined_full['S_final']
+    if all(x in ds_combined_full.data_vars for x in ['PSAL1', 'PSAL_LAB']):
+        ds_combined_full['Sdiff1'] = ds_combined_full['PSAL1'] - ds_combined_full['PSAL_LAB']
     else:
         # Could also raise an error or warning here if you want strict checking
-        ds_combined_full['Sdiff1'] = xr.full_like(ds_combined_full['S_final'], fill_value=float('nan'))
+        ds_combined_full['Sdiff1'] = xr.full_like(ds_combined_full['PSAL_LAB'], fill_value=float('nan'))
 
-    if all(x in ds_combined_full.data_vars for x in ['PSAL2', 'S_final']):
-        ds_combined_full['Sdiff2'] = ds_combined_full['PSAL2'] - ds_combined_full['S_final']
+    if all(x in ds_combined_full.data_vars for x in ['PSAL2', 'PSAL_LAB']):
+        ds_combined_full['Sdiff2'] = ds_combined_full['PSAL2'] - ds_combined_full['PSAL_LAB']
     else:
-        ds_combined_full['Sdiff2'] = xr.full_like(ds_combined_full['S_final'], fill_value=float('nan'))
+        ds_combined_full['Sdiff2'] = xr.full_like(ds_combined_full['PSAL_LAB'], fill_value=float('nan'))
+
 
     # Stack the two dims into one for easier indexing/analysis
     ds_combined = (
@@ -218,8 +227,8 @@ def merge_all_salts_with_btl(
         .reset_index('NISKIN_NUMBER_STATION')
     )
 
-    # Drop entries where S_final is NaN
-    ds_combined = ds_combined.where(~ds_combined['S_final'].isnull(), drop=True)
+    # Drop entries where PSAL_LAB is NaN
+    ds_combined = ds_combined.where(~ds_combined['PSAL_LAB'].isnull(), drop=True)
 
     return ds_combined
 
@@ -287,7 +296,7 @@ def build_salts_qc_dataset(
 def plot_salinity_diff_histogram(
     ds: xr.Dataset,
     psal_var: str = None,
-    salinometer_var: str = "S_final",
+    salinometer_var: str = "PSAL_LAB",
     min_pres: float = 500,
     N: int = 20,
     figsize=(10, 3.5)
@@ -302,7 +311,7 @@ def plot_salinity_diff_histogram(
     psal_var : str, optional
         Name of CTD salinity variable (e.g., 'PSAL1', 'PSAL2').
         If None, will auto-detect.
-    salinometer_var : str, default 'S_final'
+    salinometer_var : str, default 'PSAL_LAB'
         Name of the salinometer salinity variable.
     min_pres : float, default 500
         Minimum pressure to include in the comparison.
@@ -389,3 +398,139 @@ def plot_salinity_diff_histogram(
         button.on_click(close_fig)
     except Exception:
         pass
+
+
+
+def plot_by_sample(ds, psal_var='PSAL1', salinometer_var='PSAL_LAB',
+                   sample_number_var='Sample', min_pres=0):
+    """
+    Plot salinity comparison for samples taken at depths greater than a specified minimum pressure,
+    organized by sample number.
+
+    Parameters:
+    - ds (xr.Dataset): Input dataset containing salinity variables.
+    - psal_var (str): Name of the salinity variable to compare with PSAL_LAB.
+                      Defaults to 'PSAL1'.
+    - salinometer_var (str): Name of the salinometer salinity variable.
+    - sample_number_var (str): Name of the sample number variable.
+    - min_pres (float): Minimum pressure threshold for samples. Defaults to 500.
+
+    Returns:
+    None
+
+    Displays a multi-panel plot with interactive annotations and a close button.
+    """
+
+    # Check required variables in ds
+    for var in [psal_var, salinometer_var, sample_number_var, 'PRES']:
+        if var not in ds:
+            raise ValueError(f"Dataset missing required variable: {var}")
+
+    # Mask data where PRES > min_pres
+    mask = ds.PRES > min_pres
+
+    # Build filtered dataset b (only where mask is True)
+    b = xr.Dataset(coords={'NISKIN_NUMBER': ds.get('NISKIN_NUMBER'),
+                          'STATION': ds.get('STATION')})
+    b[psal_var] = ds[psal_var].where(mask)
+    b[salinometer_var] = ds[salinometer_var].where(mask)
+    b[sample_number_var] = ds[sample_number_var].where(mask)
+    b['PRES'] = ds.PRES.where(mask)
+
+    # Flatten arrays for convenience
+    psal_vals = b[psal_var].values.flatten()
+    salinometer_vals = b[salinometer_var].values.flatten()
+    sample_nums = b[sample_number_var].values.flatten()
+    pres_vals = b['PRES'].values.flatten()
+
+    # Calculate salinity difference and stats
+    sal_diff = (psal_vals - salinometer_vals).astype(float)
+    N_count = np.count_nonzero(~np.isnan(sal_diff))
+    Sdiff_mean = np.nanmean(sal_diff)
+
+    # Sort by sample number (ignoring NaNs)
+    valid_mask = ~np.isnan(sample_nums) & ~np.isnan(sal_diff)
+    sorted_indices = np.argsort(sample_nums[valid_mask])
+    sample_num_sorted = sample_nums[valid_mask][sorted_indices]
+    sal_diff_sorted = sal_diff[valid_mask][sorted_indices]
+    pres_sorted = pres_vals[valid_mask][sorted_indices]
+
+    # Labels for interactive annotation
+    point_labels = [
+        f"Sample #{sn:.0f} ({p:.0f} dbar)"
+        for sn, p in zip(sample_num_sorted, pres_sorted)
+    ]
+
+    # Create figure and axes
+    fig = plt.figure(figsize=(10, 6))
+    ax0 = plt.subplot2grid((2, 4), (0, 0), colspan=3)
+    ax1 = plt.subplot2grid((2, 4), (1, 0), colspan=3)
+    ax2 = plt.subplot2grid((2, 4), (1, 3), colspan=1)
+
+    # Plot salinity values on ax0
+    ax0.plot(sample_nums, psal_vals, '.', color='tab:blue', lw=0.2, alpha=0.6,
+             label=f'Bottle file {psal_var}', zorder=2)
+    ax0.plot(sample_nums, salinometer_vals, '.', color='tab:orange', lw=0.2, alpha=0.6,
+             label='Salinometer', zorder=2)
+    ax0.set_xlabel('SAMPLE NUMBER')
+    ax0.set_ylabel('Practical salinity')
+    ax0.grid(True)
+
+    # Compute correlation coefficient and p-value  (ignoring NaNs)
+    valid_corr_mask = ~np.isnan(psal_vals) & ~np.isnan(salinometer_vals)
+    if np.count_nonzero(valid_corr_mask) > 1:
+        r, pval = pearsonr(psal_vals[valid_corr_mask], salinometer_vals[valid_corr_mask])
+        corr_text = f"r = {r:.3f}, p = {pval:.1e}"
+
+    else:
+        corr_text = "r = NaN, p = NaN"
+
+    # Annotate correlation on ax0
+    ax0.text(0.02, 0.95, corr_text, transform=ax0.transAxes,
+             fontsize=10, verticalalignment='top',
+             bbox=dict(facecolor='white', edgecolor='gray', boxstyle='round,pad=0.3'))
+
+    ax0.legend()
+
+    # Add mplcursors hover annotations to ax0
+    cursor = mplcursors.cursor(ax0.collections, hover=True)
+    @cursor.connect("add")
+    def on_add(sel):
+        ind = sel.index
+        if ind < len(point_labels):
+            sel.annotation.set_text(point_labels[ind])
+
+    # Plot salinity difference on ax1
+    ax1.fill_between(sample_num_sorted, sal_diff_sorted, color='k', alpha=0.3,
+                     label='Bottle file', lw=0.2, zorder=2)
+    ax1.plot(sample_num_sorted, sal_diff_sorted, '.', color='tab:red', alpha=0.8,
+             label='Salinometer', lw=0.2, zorder=2)
+    ax1.axhline(Sdiff_mean, color='tab:blue', lw=1.6, alpha=0.75, ls=':',
+                label=f'Mean = {Sdiff_mean:.2e}')
+    ax1.set_xlabel('SAMPLE NUMBER')
+    ax1.set_ylabel(f'{psal_var} $-$ salinometer S')
+    ax1.grid(True)
+    ax1.legend()
+
+    # Plot histogram of salinity difference on ax2
+    ax2.hist(sal_diff, bins=20, orientation='horizontal', color='tab:red', alpha=0.7)
+    ax2.set_ylim(ax1.get_ylim())
+    ax2.axhline(0, color='k', ls='--')
+    ax2.axhline(Sdiff_mean, color='tab:blue', lw=1.6, alpha=0.75, ls=':',
+                label=f'Mean = {Sdiff_mean:.2e}')
+    ax2.set_xlabel('FREQUENCY')
+    ax2.set_ylabel(f'{psal_var} $-$ salinometer S')
+    ax2.grid(True)
+    ax2.legend(loc=0, bbox_to_anchor=(1, 1.2), fontsize = 9)
+
+    fig.suptitle(f'Salinity comparison for samples taken at >{min_pres} dbar (n = {N_count})')
+    plt.tight_layout()
+
+    # Button to close the figure
+    def close_everything(_):
+        plt.close(fig)
+        button_exit.close()
+
+    button_exit = widgets.Button(description="Close", layout=widgets.Layout(width='200px'))
+    button_exit.on_click(close_everything)
+    display(button_exit)

@@ -118,7 +118,7 @@ def test_merge_salts_sheet_and_log(salts_test_data):
     assert 'NISKIN_NUMBER' in ds.dims, "'NISKIN_NUMBER' dimension missing in Dataset"
 
     # Check for presence of expected data variables
-    expected_vars = {'S_final', 'Note', 'intended_sampling_depth', 'Sampling date (UTC)'}
+    expected_vars = {'PSAL_LAB', 'Note', 'intended_sampling_depth', 'Sampling date (UTC)'}
     missing_vars = expected_vars - set(ds.data_vars)
     assert not missing_vars, f"Missing expected variables in Dataset: {missing_vars}"
 
@@ -126,7 +126,7 @@ def test_merge_salts_sheet_and_log(salts_test_data):
     assert ds.sizes['STATION'] > 0 and ds.sizes['NISKIN_NUMBER'] > 0, "Dataset dimensions have zero length"
 
     # Data specific checks
-    assert ds.S_final.isel(STATION=5, NISKIN_NUMBER=1)==34.676
+    assert ds.PSAL_LAB.isel(STATION=5, NISKIN_NUMBER=1)==34.676
     assert ds.intended_sampling_depth.isel(STATION=6, NISKIN_NUMBER=1).data == 1000
 
 
@@ -147,16 +147,16 @@ def test_merge_all_salts_with_btl(salts_test_data):
 
     # --- Assertions ---
     assert isinstance(ds_combined, xr.Dataset)
-    assert 'S_final' in ds_combined.data_vars
+    assert 'PSAL_LAB' in ds_combined.data_vars
     assert 'Sdiff1' in ds_combined.data_vars
     assert 'Sdiff2' in ds_combined.data_vars
 
     # Check dimensions
     assert 'NISKIN_NUMBER_STATION' in ds_combined.dims
-    assert not ds_combined['S_final'].isnull().any(), "NaNs in S_final after merge"
+    assert not ds_combined['PSAL_LAB'].isnull().any(), "NaNs in S_final after merge"
 
     # Spot-check difference calculation (example: all diffs should be finite if PSAL1/2 exist)
-    if 'PSAL1' in ds_combined and 'S_final' in ds_combined:
+    if 'PSAL1' in ds_combined and 'PSAL_LAB' in ds_combined:
         assert ds_combined['Sdiff1'].notnull().any(), "Sdiff1 should not be all NaNs"
 
 
@@ -178,12 +178,12 @@ def test_build_salts_qc_dataset_valid(salts_test_data):
     assert ds.sizes['NISKIN_NUMBER_STATION'] > 0, "Combined dataset is empty"
 
     # Check key expected variables
-    for var in ['S_final', 'PSAL1', 'PSAL2', 'Sdiff1', 'Sdiff2']:
+    for var in ['PSAL_LAB', 'PSAL1', 'PSAL2', 'Sdiff1', 'Sdiff2']:
         assert var in ds.data_vars, f"Missing expected variable: {var}"
         assert not ds[var].isnull().all(), f"All values of {var} are NaN"
 
     # Simple physical check: salinity in plausible range
-    for sal in ['S_final', 'PSAL1', 'PSAL2']:
+    for sal in ['PSAL_LAB', 'PSAL1', 'PSAL2']:
         if sal in ds:
             assert float(ds[sal].min()) >= 0, f"{sal} has unphysical minimum"
             assert float(ds[sal].max()) <= 45, f"{sal} has unphysical maximum"
@@ -228,12 +228,12 @@ def test_plot_salinity_diff_histogram_runs():
 
     ds = xr.Dataset({
         'PSAL1': ('dim_0', psal),
-        'S_final': ('dim_0', salinometer),
+        'PSAL_LAB': ('dim_0', salinometer),
         'PRES': ('dim_0', pres)
     })
 
     # Run plotting function with defaults
-    salts.plot_salinity_diff_histogram(ds, psal_var='PSAL1', salinometer_var='S_final', min_pres=200)
+    salts.plot_salinity_diff_histogram(ds, psal_var='PSAL1', salinometer_var='PSAL_LAB', min_pres=200)
 
     # Check that the current figure is created (optional)
     fig = plt.gcf()
@@ -250,10 +250,10 @@ def test_plot_salinity_diff_histogram_raises_on_missing_vars():
     # Missing salinometer_var 'S_final'
     import pytest
     with pytest.raises(ValueError):
-        salts.plot_salinity_diff_histogram(ds, salinometer_var='S_final')
+        salts.plot_salinity_diff_histogram(ds, salinometer_var='PSAL_LAB')
 
     ds2 = xr.Dataset({
-        'S_final': ('dim_0', np.ones(10)),
+        'PSAL_LAB': ('dim_0', np.ones(10)),
         'PRES': ('dim_0', np.ones(10) * 600)
     })
     # Missing psal_var (default)
@@ -262,8 +262,70 @@ def test_plot_salinity_diff_histogram_raises_on_missing_vars():
 
     ds3 = xr.Dataset({
         'PSAL1': ('dim_0', np.ones(10)),
-        'S_final': ('dim_0', np.ones(10))
+        'PSAL_LAB': ('dim_0', np.ones(10))
         # Missing PRES
     })
     with pytest.raises(ValueError):
         salts.plot_salinity_diff_histogram(ds3)
+
+
+def test_plot_by_sample_runs_minimal():
+    n = 50
+    pres = np.linspace(0, 1000, n)
+    psal = 35 + 0.01 * np.random.randn(n)
+    salinometer = 35 + 0.005 * np.random.randn(n)
+    sample_numbers = np.arange(n)
+
+    ds = xr.Dataset({
+        'PSAL1': ('dim_0', psal),
+        'PSAL_LAB': ('dim_0', salinometer),
+        'PRES': ('dim_0', pres),
+        'Sample': ('dim_0', sample_numbers)
+    })
+
+    salts.plot_by_sample(ds)  # Using defaults
+    fig = plt.gcf()
+    assert fig is not None
+    plt.close(fig)
+
+
+
+def test_plot_by_sample_raises_on_missing_vars():
+    base = np.ones(10)
+    sample = np.arange(10)
+
+    # Missing PSAL1
+    ds1 = xr.Dataset({
+        'PSAL_LAB': ('dim_0', base),
+        'PRES': ('dim_0', base * 600),
+        'Sample': ('dim_0', sample)
+    })
+    with pytest.raises(ValueError, match="PSAL1"):
+        salts.plot_by_sample(ds1)
+
+    # Missing PSAL_LAB
+    ds2 = xr.Dataset({
+        'PSAL1': ('dim_0', base),
+        'PRES': ('dim_0', base * 600),
+        'Sample': ('dim_0', sample)
+    })
+    with pytest.raises(ValueError, match="PSAL_LAB"):
+        salts.plot_by_sample(ds2)
+
+    # Missing Sample
+    ds3 = xr.Dataset({
+        'PSAL1': ('dim_0', base),
+        'PSAL_LAB': ('dim_0', base),
+        'PRES': ('dim_0', base * 600)
+    })
+    with pytest.raises(ValueError, match="Sample"):
+        salts.plot_by_sample(ds3)
+
+    # Missing PRES
+    ds4 = xr.Dataset({
+        'PSAL1': ('dim_0', base),
+        'PSAL_LAB': ('dim_0', base),
+        'Sample': ('dim_0', sample)
+    })
+    with pytest.raises(ValueError, match="PRES"):
+        salts.plot_by_sample(ds4)
