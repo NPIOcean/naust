@@ -10,6 +10,13 @@ Example of things to put here:
 - NPI-specific metadata fixing.
 - Salinity QC.
 - Log sheets, excel sheets and associated parsers or converterts.
+____
+
+**USAGE EXAMPLES**
+
+
+
+- [QC of CTD salinity against salinometer values](notebooks/examples/salts/Salt_QC_example.ipynb)
 
 ____
 
@@ -18,4 +25,5 @@ ____
 
 **STATUS**
 
+- *17.06.25*: Added a salinity QC module.
 - *09.04.25*: Initialized. Planning to build a quick loading module for dealing with Fram Strait bottle data.
