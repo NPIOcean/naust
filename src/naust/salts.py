@@ -11,6 +11,7 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 import xarray as xr
+from kval.data import ctd
 
 def read_salts_sheet(xlsx_file: str | Path) -> pd.DataFrame:
     """
@@ -214,5 +215,64 @@ def merge_all_salts_with_btl(
 
     # Drop entries where S_final is NaN
     ds_combined = ds_combined.where(~ds_combined['S_final'].isnull(), drop=True)
+
+    return ds_combined
+
+
+def build_salts_qc_dataset(
+    log_xlsx: Path,
+    salts_xlsx: Path,
+    btl_dir: Path
+) -> xr.Dataset:
+    """
+    Load and combine salinometer, sample log, and CTD bottle data into a
+    single xarray Dataset for quality control and analysis.
+
+    Parameters
+    ----------
+    log_xlsx : Path
+        Path to the sample log sheet (Excel).
+    salts_xlsx : Path
+        Path to the salinometer lab readings (Excel).
+    btl_dir : Path
+        Directory containing CTD .btl files.
+
+    Returns
+    -------
+    xr.Dataset
+        Combined dataset with salinometer data, CTD bottle data, and
+        computed salinity differences.
+
+    Raises
+    ------
+    FileNotFoundError
+        If any of the input files or directory is missing.
+    ValueError
+        If required columns or data are missing from the input sheets.
+    """
+    try:
+        df_salts: pd.DataFrame = read_salts_sheet(salts_xlsx)
+    except Exception as e:
+        raise ValueError(f"Failed to read salinometer sheet '{salts_xlsx}': {e}")
+
+    try:
+        df_log: pd.DataFrame = read_salts_log(log_xlsx)
+    except Exception as e:
+        raise ValueError(f"Failed to read sample log sheet '{log_xlsx}': {e}")
+
+    try:
+        ds_salts: xr.Dataset = merge_salts_sheet_and_log(df_salts, df_log)
+    except Exception as e:
+        raise ValueError(f"Failed to merge salinometer and log data: {e}")
+
+    try:
+        ds_btl: xr.Dataset = ctd.dataset_from_btl_dir(btl_dir)
+    except Exception as e:
+        raise FileNotFoundError(f"Failed to load CTD bottle data from '{btl_dir}': {e}")
+
+    try:
+        ds_combined: xr.Dataset = merge_all_salts_with_btl(ds_salts, ds_btl)
+    except Exception as e:
+        raise ValueError(f"Failed to merge salinometer and CTD datasets: {e}")
 
     return ds_combined

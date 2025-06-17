@@ -126,7 +126,6 @@ def test_merge_salts_sheet_and_log(salts_test_data):
 
 
 
-
 def test_merge_all_salts_with_btl(salts_test_data):
     # Load salinometer data
     df_salts = salts.read_salts_sheet(salts_test_data['salts_sheet'])
@@ -154,3 +153,61 @@ def test_merge_all_salts_with_btl(salts_test_data):
     # Spot-check difference calculation (example: all diffs should be finite if PSAL1/2 exist)
     if 'PSAL1' in ds_combined and 'S_final' in ds_combined:
         assert ds_combined['Sdiff1'].notnull().any(), "Sdiff1 should not be all NaNs"
+
+def test_build_salts_qc_dataset_valid(salts_test_data):
+    """
+    Test successful creation of the salinity QC dataset from test data.
+    """
+
+    log_sheet = salts_test_data['log_sheet']
+    salts_sheet = salts_test_data['salts_sheet']
+    btl_dir = str(salts_test_data['btl_dir']) + '/'
+
+    ds = salts.build_salts_qc_dataset(log_sheet, salts_sheet, btl_dir)
+
+    assert isinstance(ds, xr.Dataset), "Returned object is not an xarray.Dataset"
+    assert 'NISKIN_NUMBER_STATION' in ds.dims, "Missing expected stacked dimension"
+
+    # Expect non-empty dataset
+    assert ds.sizes['NISKIN_NUMBER_STATION'] > 0, "Combined dataset is empty"
+
+    # Check key expected variables
+    for var in ['S_final', 'PSAL1', 'PSAL2', 'Sdiff1', 'Sdiff2']:
+        assert var in ds.data_vars, f"Missing expected variable: {var}"
+        assert not ds[var].isnull().all(), f"All values of {var} are NaN"
+
+    # Simple physical check: salinity in plausible range
+    for sal in ['S_final', 'PSAL1', 'PSAL2']:
+        if sal in ds:
+            assert float(ds[sal].min()) >= 0, f"{sal} has unphysical minimum"
+            assert float(ds[sal].max()) <= 45, f"{sal} has unphysical maximum"
+
+
+def test_build_salts_qc_dataset_missing_file(tmp_path):
+    """
+    Ensure that missing input files raise appropriate exceptions.
+    """
+
+    # Create dummy paths that don't exist
+    bad_log = tmp_path / "missing_log.xlsx"
+    bad_salts = tmp_path / "missing_salts.xlsx"
+    bad_btl_dir = str(tmp_path / "btl" ) + '/'
+
+    with pytest.raises(Exception):
+        salts.build_salts_qc_dataset(bad_log, bad_salts, bad_btl_dir)
+
+
+def test_build_salts_qc_dataset_corrupted_input(salts_test_data, tmp_path):
+    """
+    Test that corrupted or malformed input raises an error.
+    """
+
+    # Create a dummy file that is not a real Excel file
+    broken_xlsx = tmp_path / "broken.xlsx"
+    broken_xlsx.write_text("Not a real Excel file")
+
+    btl_dir = str(salts_test_data['btl_dir']) + '/'
+
+    # Use real btl_dir but fake sheets
+    with pytest.raises(ValueError):
+        salts.build_salts_qc_dataset(broken_xlsx, broken_xlsx, btl_dir)
