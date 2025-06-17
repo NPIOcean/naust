@@ -5,9 +5,14 @@ Testing naust.salts.py
 from pathlib import Path
 import pytest
 from naust import salts
+import numpy as np
 import pandas as pd
 import xarray as xr
 from kval.data import ctd
+import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
+from matplotlib.ticker import MaxNLocator
+
 
 # Define test data paths (TT25 data)
 @pytest.fixture
@@ -154,6 +159,7 @@ def test_merge_all_salts_with_btl(salts_test_data):
     if 'PSAL1' in ds_combined and 'S_final' in ds_combined:
         assert ds_combined['Sdiff1'].notnull().any(), "Sdiff1 should not be all NaNs"
 
+
 def test_build_salts_qc_dataset_valid(salts_test_data):
     """
     Test successful creation of the salinity QC dataset from test data.
@@ -211,3 +217,53 @@ def test_build_salts_qc_dataset_corrupted_input(salts_test_data, tmp_path):
     # Use real btl_dir but fake sheets
     with pytest.raises(ValueError):
         salts.build_salts_qc_dataset(broken_xlsx, broken_xlsx, btl_dir)
+
+
+def test_plot_salinity_diff_histogram_runs():
+    # Create minimal test Dataset
+    n = 50
+    pres = np.linspace(0, 1000, n)
+    psal = 35 + 0.01 * np.random.randn(n)
+    salinometer = 35 + 0.005 * np.random.randn(n)
+
+    ds = xr.Dataset({
+        'PSAL1': ('dim_0', psal),
+        'S_final': ('dim_0', salinometer),
+        'PRES': ('dim_0', pres)
+    })
+
+    # Run plotting function with defaults
+    salts.plot_salinity_diff_histogram(ds, psal_var='PSAL1', salinometer_var='S_final', min_pres=200)
+
+    # Check that the current figure is created (optional)
+    fig = plt.gcf()
+    assert fig is not None
+    # Close plot after test to prevent display issues in CI
+    plt.close(fig)
+
+
+def test_plot_salinity_diff_histogram_raises_on_missing_vars():
+    ds = xr.Dataset({
+        'PSAL1': ('dim_0', np.ones(10)),
+        'PRES': ('dim_0', np.ones(10) * 600)
+    })
+    # Missing salinometer_var 'S_final'
+    import pytest
+    with pytest.raises(ValueError):
+        salts.plot_salinity_diff_histogram(ds, salinometer_var='S_final')
+
+    ds2 = xr.Dataset({
+        'S_final': ('dim_0', np.ones(10)),
+        'PRES': ('dim_0', np.ones(10) * 600)
+    })
+    # Missing psal_var (default)
+    with pytest.raises(ValueError):
+        salts.plot_salinity_diff_histogram(ds2)
+
+    ds3 = xr.Dataset({
+        'PSAL1': ('dim_0', np.ones(10)),
+        'S_final': ('dim_0', np.ones(10))
+        # Missing PRES
+    })
+    with pytest.raises(ValueError):
+        salts.plot_salinity_diff_histogram(ds3)

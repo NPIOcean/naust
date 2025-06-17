@@ -12,6 +12,11 @@ import numpy as np
 from pathlib import Path
 import xarray as xr
 from kval.data import ctd
+import matplotlib.pyplot as plt
+import ipywidgets as widgets
+from IPython.display import display
+from matplotlib.ticker import MaxNLocator
+import matplotlib.lines as mlines
 
 def read_salts_sheet(xlsx_file: str | Path) -> pd.DataFrame:
     """
@@ -276,3 +281,111 @@ def build_salts_qc_dataset(
         raise ValueError(f"Failed to merge salinometer and CTD datasets: {e}")
 
     return ds_combined
+
+
+
+def plot_salinity_diff_histogram(
+    ds: xr.Dataset,
+    psal_var: str = None,
+    salinometer_var: str = "S_final",
+    min_pres: float = 500,
+    N: int = 20,
+    figsize=(10, 3.5)
+):
+    """
+    Plot a histogram of the salinity difference between a CTD variable and the salinometer.
+
+    Parameters:
+    ----------
+    ds : xr.Dataset
+        Dataset returned by `build_salts_qc_dataset`, containing CTD and salinometer data.
+    psal_var : str, optional
+        Name of CTD salinity variable (e.g., 'PSAL1', 'PSAL2').
+        If None, will auto-detect.
+    salinometer_var : str, default 'S_final'
+        Name of the salinometer salinity variable.
+    min_pres : float, default 500
+        Minimum pressure to include in the comparison.
+    N : int, default 20
+        Number of histogram bins.
+    figsize : tuple, default (7, 3.5)
+        Size of figure in inches.
+
+    Returns:
+    -------
+    None. Displays the plot in Jupyter.
+    """
+
+    if psal_var is None:
+        for default_var in ['PSAL1', 'PSAL', 'PSAL2']:
+            if default_var in ds:
+                psal_var = default_var
+                break
+        else:
+            raise ValueError("No PSAL variable found. Specify `psal_var` explicitly.")
+
+    if salinometer_var not in ds:
+        raise ValueError(f"Salinometer variable '{salinometer_var}' not found in dataset.")
+
+    if 'PRES' not in ds:
+        raise ValueError("Pressure variable 'PRES' not found in dataset.")
+
+    # Compute the difference
+    SAL_diff = ds[psal_var] - ds[salinometer_var]
+
+    # Filter to deep samples
+    deep = SAL_diff.where(ds.PRES > min_pres).astype(float)
+
+    # Statistics
+    valid = deep.where(~deep.isnull(), drop=True)
+    if valid.size == 0:
+        raise ValueError("No valid data points after pressure filtering.")
+
+    diff_mean = valid.mean().item()
+    diff_median = valid.median().item()
+    count = valid.size
+
+    diff_std = valid.std().values
+    sem = diff_std / np.sqrt(count)
+
+    # Plot
+    fig, ax = plt.subplots(figsize=figsize)
+    ax.yaxis.set_major_locator(MaxNLocator(integer=True))
+    ax.hist(valid.values.flatten(), bins=N, color='steelblue', alpha=0.7)
+
+    ax.axvline(0, color='k', ls='--', lw=1)
+    mean_line = ax.axvline(diff_mean, color='tab:red', dashes=(5, 3), lw=1,
+               label=f'Mean = {diff_mean:.4f}')
+    median_line = ax.axvline(diff_median, color='tab:red', ls=':', lw=1.5,
+               label=f'Median = {diff_median:.4f}')
+
+    ax.set_xlabel(f"{psal_var} - {salinometer_var}")
+    ax.set_ylabel("Frequency")
+    ax.set_title(f"{psal_var}: Salinity difference at pressure > {min_pres} dbar (n={count})")
+    ax.grid(True)
+    #ax.legend()
+
+
+
+    # Create dummy (invisible) handle for std
+    std_handle = mlines.Line2D([], [], color='none', label=f'Std = {diff_std:.4f}')
+
+    # Now create legend with both mean/median lines and dummy std handle
+    ax.legend(handles=[mean_line, median_line, std_handle], loc = 1,
+              bbox_to_anchor = (1.3, 0.6))
+
+    plt.tight_layout()
+
+
+    # Close button (Jupyter only)
+    try:
+        button = widgets.Button(description="Close", layout=widgets.Layout(width='150px'))
+        display(button)
+
+        def close_fig(_):
+            plt.close(fig)
+            button.close()
+
+        button.on_click(close_fig)
+    except Exception:
+        pass
