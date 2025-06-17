@@ -1,8 +1,6 @@
 ![image](documents/graphics/naust_banner.png)
 
-Collection of Python functions for working with oceanography data specific to the [Norwegian Polar Institute](https://www.npolar.no/en/) (NPI).
-
-Maintained by the Oceanography section at NPI.
+Collection of various Python functions, templates etc for working with oceanography data specific to the [Norwegian Polar Institute](https://www.npolar.no/en/) (NPI).
 
 The idea is more in-house specific things can live here, but more truly general stuff can live in [kval](github.com/NPIOcean/kval).
 
@@ -13,6 +11,9 @@ Example of things to put here:
 - Salinity QC.
 - Log sheets, excel sheets and associated parsers or converterts.
 
+____
+
+Maintained by the Oceanography section at NPI.
 ____
 
 **STATUS**

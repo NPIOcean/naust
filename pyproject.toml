@@ -1,6 +1,6 @@
 [project]
 name = "naust"
-description = "NPI-specific ocean data formats and parsing"
+description = "Tools and templates for handling NPI-specific oceanographic data tasks"
 version = "0.1.0"
 readme = "README.md"
 
