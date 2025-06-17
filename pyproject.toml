@@ -1,0 +1,66 @@
+[project]
+name = "naust"
+description = "NPI-specific ocean data formats and parsing"
+version = "0.1.0"
+readme = "README.md"
+
+authors = [
+  { name = "Øyvind Foss", email = "oyvind.foss@npolar.no" },
+  { name = "Tore Hattermann", email = "tore.hattermann@npolar.no" },
+
+]
+
+maintainers = [
+  { name = "Norwegian Polar Institute, Oceanography section", email = "" },
+  { name = "Øyvind Foss, NPI", email = "oyvind.foss@npolar.no" },
+]
+
+requires-python = ">=3.9"
+dependencies = [
+  "xarray>=2023.10.1",
+  "jupyter>=1.0.0",
+  "ipykernel>=6.26.0",
+  "matplotlib>=3.7.2",
+  "kval>=0.3",
+  "numpy>=1.23",
+  "pandas>=2.1.0",
+  "glob2>=0.7",
+  "seawater>=3.3.4",
+  "cftime>=1.6.2",
+  "scipy>=1.11.3",
+  "cmocean>=3.0.3",
+  "ipympl>=0.9.3",
+  "mplcursors>=0.5.3",
+
+]
+
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering :: Oceanography",
+]
+
+license = "MIT"
+
+[project.optional-dependencies]
+compliance = [
+]
+
+dev = [
+  "pytest>=8.1.1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project.urls]
+Homepage = "https://github.com/NPIOcean/naust/"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/naust"]
