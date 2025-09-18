@@ -12,6 +12,7 @@ import numpy as np
 from pathlib import Path
 import xarray as xr
 from kval.data import ctd
+from kval.util import xr_funcs
 import matplotlib.pyplot as plt
 import ipywidgets as widgets
 from IPython.display import display
@@ -19,6 +20,8 @@ from matplotlib.ticker import MaxNLocator
 import matplotlib.lines as mlines
 import mplcursors
 from scipy.stats import pearsonr
+import warnings
+
 
 def read_salts_sheet(xlsx_file: str | Path) -> pd.DataFrame:
     """
@@ -31,7 +34,10 @@ def read_salts_sheet(xlsx_file: str | Path) -> pd.DataFrame:
         pd.DataFrame: Cleaned DataFrame containing salinometer readings.
     """
     # Read initial sheet to find "START" marker
-    df_preview = pd.read_excel(xlsx_file, header=None)
+    # (ignore a warning about conditional formatting )
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", UserWarning)
+        df_preview = pd.read_excel(xlsx_file, header=None)
 
     # Find the row where 'START' appears in the first column
     try:
@@ -40,7 +46,10 @@ def read_salts_sheet(xlsx_file: str | Path) -> pd.DataFrame:
         raise ValueError(f"'START' not found in the first column of {xlsx_file}")
 
     # Read actual data, starting one row after 'START'
-    df = pd.read_excel(xlsx_file, skiprows=start_row + 1)
+    # (ignore a warning about conditional formatting )
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", UserWarning)
+        df = pd.read_excel(xlsx_file, skiprows=start_row + 1)
 
     # Coerce 'Sample' column to integer, set bad entries to 9999
     if 'Sample' in df.columns:
@@ -52,7 +61,29 @@ def read_salts_sheet(xlsx_file: str | Path) -> pd.DataFrame:
     else:
         raise ValueError("'Sample' column not found in parsed data")
 
-    return df
+    # Rename 'Sample' to SAL_SAMPLE_NUMBER
+    df_salts = df.rename(columns={"Sample": "SAL_SAMPLE_NUMBER"})
+
+    # Check if sample numbers are unioque (excluding fill value 9999)
+    sample_numbers_are_unique = df_salts.loc[df_salts["SAL_SAMPLE_NUMBER"] != 9999, "SAL_SAMPLE_NUMBER"].is_unique
+
+    if not sample_numbers_are_unique:
+
+        # Boolean mask of duplicated sample numbers
+        duplicates_mask = df_salts["SAL_SAMPLE_NUMBER"].duplicated(keep=False)
+
+        # Show all duplicated sample numbers (including all occurrences)
+        df_duplicates = df_salts.loc[duplicates_mask, "SAL_SAMPLE_NUMBER"]
+        # Dont include 9999
+        df_duplicates = df_duplicates[df_duplicates!= 9999]
+
+        duplicates = np.unique(list(df_duplicates))
+        raise Exception(f'It looks like "{Path(xlsx_file).name}" contains '
+                        'duplicate sample numbers! (Sample numbers must'
+                        ' be unique - correct the sheet?)\n'
+                        f'Duplicate sample numbers: {duplicates}')
+
+    return df_salts
 
 
 def salts_sheet_to_csv(xlsx_file: str | Path, csv_file: str | Path):
@@ -68,9 +99,9 @@ def salts_sheet_to_csv(xlsx_file: str | Path, csv_file: str | Path):
 
 
 
-def read_salts_log(xlsx_file: str | Path):
+def read_salts_log_tt_style(xlsx_file: str | Path):
     '''
-    Read a cruise log file (.xlsx) and extract metadata about the salinity
+    Read a cruise log file (.xlsx) in the TrollTransect style and extract metadata about the salinity
     samples (sample numbers, Niskin bottle numbers etc) to a Pandas DataFrame.
     '''
 
@@ -91,8 +122,8 @@ def read_salts_log(xlsx_file: str | Path):
     # Convert NISKIN_NUMBER to int64
     df_log_salt['NISKIN_NUMBER'] = df_log_salt['NISKIN_NUMBER'].astype('int64')
 
-    # Extract digits from 'Sample name' as sample_number, convert safely to int
-    df_log_salt['sample_number'] = (
+    # Extract digits from 'Sample name' as SAL_SAMPLE_NUMBER, convert safely to int
+    df_log_salt['SAL_SAMPLE_NUMBER'] = (
         df_log_salt['Sample name'].str.extract(r'(\d+)', expand=False)
         .astype('int64')
     )
@@ -104,6 +135,113 @@ def read_salts_log(xlsx_file: str | Path):
     )
 
     return df_log_salt
+
+
+def read_salts_log_fs_style(xlsx_file: str) -> xr.Dataset:
+    """
+    Read an cruise sample log sheet and convert it to an xarray Dataset.
+
+    This function extracts station metadata and salinity sample numbers
+    from the log sheet Excel file. The resulting Dataset contains dimensions
+    'STATION' and 'NISKIN_NUMBER', as well as variable 'SAL_SAMPLE_NUMBER'.
+    Additional metadata from the header fields are included as station-level
+    coordinates.
+
+    Args:
+        log_sheet: Path to the Excel log sheet or a preloaded ExcelFile object.
+
+    Returns:
+        Dataset with dimensions ('NISKIN_NUMBER', 'STATION') and
+        station-level metadata variables.
+    """
+    # --- Read the log sheet ---
+    df_log_all = pd.read_excel(xlsx_file)
+
+    # --- Extract header info ---
+    cut_idx = df_log_all.index[df_log_all["Unnamed: 0"] == "Moon Pool? yes/no (0/1)"][0]
+    df_cut = df_log_all.iloc[:cut_idx + 1, :]
+    df_station_meta = (
+        df_cut.set_index("Unnamed: 0")
+        .T
+        .rename_axis("STN")
+        .reset_index()
+    )
+    df_station_meta = df_station_meta[df_station_meta["STN"] != "STN"].copy()
+    df_station_meta["STN"] = pd.to_numeric(df_station_meta["STN"], errors="coerce")
+    df_station_meta = df_station_meta.rename(columns={"STN": "STATION"})
+
+    # --- Extract salinity sample information ---
+    sal_start_idx = df_log_all.index[df_log_all["Unnamed: 0"] == "Salinity"][0]
+    mask = df_log_all.loc[sal_start_idx + 1:, "STN"].isna()
+    sal_end_idx = mask.idxmax() if mask.any() else len(df_log_all)
+    df_sal = df_log_all.iloc[sal_start_idx:sal_end_idx, :]
+
+    # Clean up salinity DataFrame
+    df_sal = df_sal.iloc[:, 1:].copy()  # drop leftmost column
+    df_sal = df_sal.rename(columns={"STN": "NISKIN_NUMBER"})
+    df_sal["NISKIN_NUMBER"] = df_sal["NISKIN_NUMBER"].astype(int)
+
+    # Read stations
+    station_list = list(df_sal.columns.drop("NISKIN_NUMBER"))
+
+    # Convert to xarray Dataset
+    ds_sal = xr.Dataset(
+        data_vars={
+            "SAL_SAMPLE_NUMBER": (
+                ("NISKIN_NUMBER", "STATION"),
+                df_sal.to_numpy()[:, 1:]
+            )
+        },
+        coords={
+            "STATION": station_list,
+            "NISKIN_NUMBER": df_sal["NISKIN_NUMBER"]
+        }
+    )
+
+    # Add station-level metadata (pressure, echo depth, whatever is in the xlsx)
+    for meta_var in df_station_meta.columns:
+        if meta_var != "STATION":
+            ds_sal[meta_var] = ("STATION", df_station_meta[meta_var])
+
+    # Convert to DataFrame
+    df_sal = (ds_sal
+        # Convert the Dataset to a DataFrame with a MultiIndex (NISKIN_NUMBER, STATION):
+        .to_dataframe()        
+        # Flatten the MultiIndex into regular columns: 'NISKIN_NUMBER' and 'STATION'         
+        .reset_index()                  
+         # Remove rows where the sample number is missing (NaN)
+        .dropna(subset=["SAL_SAMPLE_NUMBER"]) 
+         # Convert sample numbers from float to integer for consistency
+        .astype(int))
+   
+    return df_sal
+
+
+def read_salts_log(xlsx_file: str) -> xr.Dataset:
+    '''
+    Read an cruise sample log sheet and convert it to an xarray Dataset.
+
+    Tries to read the TrollTransect format, if that fails tries to read the Fram 
+    Strait format.
+
+    '''
+
+    try:
+        df_sal = read_salts_log_tt_style(xlsx_file)
+    except:
+        try:
+            df_sal = read_salts_log_fs_style(xlsx_file)
+        except:
+            raise Exception(f'Unable to parse {xlsx_file}')
+    
+    try:
+        df_sal["STATION"] = df_sal["STATION"].astype(str).str.lstrip("0").astype(int)
+    except:
+        warnings.warn('Unable to convert all values of "station" in the .btl files -'
+                      ' probably non-numerical values. Correct or proceed with caution.',
+                      UserWarning)
+
+    return df_sal
 
 
 def merge_salts_sheet_and_log(
@@ -119,7 +257,7 @@ def merge_salts_sheet_and_log(
     Parameters:
         df_salts (pd.DataFrame): Salinometer readings DataFrame (with 'Sample',
         'S_final', etc). df_log (pd.DataFrame): Cruise log DataFrame (with
-        'sample_number', 'STATION', 'NISKIN_NUMBER', etc).
+        'SAL_SAMPLE_NUMBER', 'STATION', 'NISKIN_NUMBER', etc).
 
     Returns:
         xr.Dataset: Dataset with dimensions STATION and NISKIN_NUMBER.
@@ -128,9 +266,8 @@ def merge_salts_sheet_and_log(
         ValueError: If required columns are missing or merge results empty
         DataFrame.
     '''
-    required_salts_cols = {'Sample', 'S_final', 'Note'}
-    required_log_cols = {'sample_number', 'STATION', 'NISKIN_NUMBER',
-                         'intended_sampling_depth', 'Sampling date (UTC)'}
+    required_salts_cols = {'SAL_SAMPLE_NUMBER', 'S_final', 'Note'}
+    required_log_cols = {'SAL_SAMPLE_NUMBER', 'STATION', 'NISKIN_NUMBER',}
 
     missing_salts = required_salts_cols - set(df_salts.columns)
     missing_log = required_log_cols - set(df_log.columns)
@@ -143,7 +280,7 @@ def merge_salts_sheet_and_log(
     try:
         df_merged = pd.merge(
             df_log, df_salts,
-            left_on='sample_number', right_on='Sample', how='left'
+            left_on='SAL_SAMPLE_NUMBER', right_on='SAL_SAMPLE_NUMBER', how='left'
         )
     except Exception as e:
         raise RuntimeError(f"Error during merge: {e}")
@@ -151,9 +288,9 @@ def merge_salts_sheet_and_log(
     if df_merged.empty:
         raise ValueError("Merge resulted in an empty DataFrame - check input data.")
 
+
     cols_to_keep = [
-        'intended_sampling_depth', 'Sampling date (UTC)', 'NISKIN_NUMBER',
-        'Sample', 'STATION', 'S_final', 'Note'
+        'NISKIN_NUMBER', 'SAL_SAMPLE_NUMBER', 'STATION', 'S_final', 'Note'
     ]
 
     # Check again if all cols to keep are present after merge
@@ -161,21 +298,22 @@ def merge_salts_sheet_and_log(
     if missing_after_merge:
         raise ValueError(f"Columns missing after merge: {missing_after_merge}")
 
-    df_merged = df_merged[cols_to_keep]
+#    df_merged = df_merged[cols_to_keep]
 
     df_merged = df_merged.set_index(['STATION', 'NISKIN_NUMBER'])
-
     ds_merged = xr.Dataset.from_dataframe(df_merged)
-
 
     # Rename S_final to PSAL_LAB
     ds_merged = ds_merged.rename_vars({'S_final': 'PSAL_LAB'})
     return ds_merged
 
 
+
+
 def merge_all_salts_with_btl(
     ds_salts: xr.Dataset,
-    ds_btl: xr.Dataset
+    ds_btl: xr.Dataset,
+    stack_to_1D: bool = True
 ) -> xr.Dataset:
     '''
     Combine data from merged salinometer readings and btl files.
@@ -187,6 +325,9 @@ def merge_all_salts_with_btl(
     Parameters:
         ds_salts (xr.Dataset): Dataset with salinometer data, dims STATION, NISKIN_NUMBER.
         ds_btl (xr.Dataset): Dataset with bottle CTD data, dims STATION, NISKIN_NUMBER.
+        stack_to_1D (bool): 
+            Whether to reduce dimensionality from 2 (STATION, NISKIN_NUMBER)
+            to 1 (NISKIN_NUMBER_STATION). Default is True.
 
     Returns:
         xr.Dataset: Combined Dataset with computed differences and stacked dimension.
@@ -194,7 +335,19 @@ def merge_all_salts_with_btl(
 
     # Swap TIME to STATION
     if 'TIME' in ds_btl.dims:
-        ds_btl = ds_btl.swap_dims({'TIME': 'STATION'})
+        ds_btl = xr_funcs.swap_var_coord(ds_btl, 'TIME', 'STATION')
+
+    # Convert NISKIN_NUMBER to int (if needed)
+    ds_btl["NISKIN_NUMBER"] = ds_btl["NISKIN_NUMBER"].astype(int)
+
+    # Convert STATION to int
+    try:
+        ds_btl["STATION"] = ds_btl["STATION"].astype(str).str.lstrip("0").astype(int)
+    except:
+        warnings.warn('Unable to convert all values of "station" in the .btl files -'
+                      ' probably non-numerical values. Correct or proceed with caution.',
+                      UserWarning)
+
 
     # Make a copy of ds_btl to avoid modifying in place
     ds_combined_full = ds_btl.copy()
@@ -219,16 +372,16 @@ def merge_all_salts_with_btl(
     else:
         ds_combined_full['Sdiff2'] = xr.full_like(ds_combined_full['PSAL_LAB'], fill_value=float('nan'))
 
+    if stack_to_1D:
+        # Stack the two dims into one for easier indexing/analysis
+        ds_combined = (
+            ds_combined_full
+            .stack(NISKIN_NUMBER_STATION=['NISKIN_NUMBER', 'STATION'])
+            .reset_index('NISKIN_NUMBER_STATION')
+        )
 
-    # Stack the two dims into one for easier indexing/analysis
-    ds_combined = (
-        ds_combined_full
-        .stack(NISKIN_NUMBER_STATION=['NISKIN_NUMBER', 'STATION'])
-        .reset_index('NISKIN_NUMBER_STATION')
-    )
-
-    # Drop entries where PSAL_LAB is NaN
-    ds_combined = ds_combined.where(~ds_combined['PSAL_LAB'].isnull(), drop=True)
+        # Drop entries where PSAL_LAB is NaN
+        ds_combined = ds_combined.where(~ds_combined['PSAL_LAB'].isnull(), drop=True)
 
     return ds_combined
 
@@ -270,12 +423,14 @@ def build_salts_qc_dataset(
         raise ValueError(f"Failed to read salinometer sheet '{salts_xlsx}': {e}")
 
     try:
-        df_log: pd.DataFrame = read_salts_log(log_xlsx)
+        df_log: pd.DataFrame | xr.Dataset = read_salts_log(log_xlsx)
     except Exception as e:
         raise ValueError(f"Failed to read sample log sheet '{log_xlsx}': {e}")
 
     try:
         ds_salts: xr.Dataset = merge_salts_sheet_and_log(df_salts, df_log)
+
+
     except Exception as e:
         raise ValueError(f"Failed to merge salinometer and log data: {e}")
 
@@ -283,6 +438,10 @@ def build_salts_qc_dataset(
         ds_btl: xr.Dataset = ctd.dataset_from_btl_dir(btl_dir)
     except Exception as e:
         raise FileNotFoundError(f"Failed to load CTD bottle data from '{btl_dir}': {e}")
+
+
+
+
 
     try:
         ds_combined: xr.Dataset = merge_all_salts_with_btl(ds_salts, ds_btl)
@@ -402,7 +561,7 @@ def plot_salinity_diff_histogram(
 
 
 def plot_by_sample(ds, psal_var='PSAL1', salinometer_var='PSAL_LAB',
-                   sample_number_var='Sample', min_pres=0):
+                   SAL_SAMPLE_NUMBER_var='SAL_SAMPLE_NUMBER', min_pres=0):
     """
     Plot salinity comparison for samples taken at depths greater than a specified minimum pressure,
     organized by sample number.
@@ -412,7 +571,7 @@ def plot_by_sample(ds, psal_var='PSAL1', salinometer_var='PSAL_LAB',
     - psal_var (str): Name of the salinity variable to compare with PSAL_LAB.
                       Defaults to 'PSAL1'.
     - salinometer_var (str): Name of the salinometer salinity variable.
-    - sample_number_var (str): Name of the sample number variable.
+    - SAL_SAMPLE_NUMBER_var (str): Name of the sample number variable.
     - min_pres (float): Minimum pressure threshold for samples. Defaults to 500.
 
     Returns:
@@ -422,7 +581,7 @@ def plot_by_sample(ds, psal_var='PSAL1', salinometer_var='PSAL_LAB',
     """
 
     # Check required variables in ds
-    for var in [psal_var, salinometer_var, sample_number_var, 'PRES']:
+    for var in [psal_var, salinometer_var, SAL_SAMPLE_NUMBER_var, 'PRES']:
         if var not in ds:
             raise ValueError(f"Dataset missing required variable: {var}")
 
@@ -434,13 +593,13 @@ def plot_by_sample(ds, psal_var='PSAL1', salinometer_var='PSAL_LAB',
                           'STATION': ds.get('STATION')})
     b[psal_var] = ds[psal_var].where(mask)
     b[salinometer_var] = ds[salinometer_var].where(mask)
-    b[sample_number_var] = ds[sample_number_var].where(mask)
+    b[SAL_SAMPLE_NUMBER_var] = ds[SAL_SAMPLE_NUMBER_var].where(mask)
     b['PRES'] = ds.PRES.where(mask)
 
     # Flatten arrays for convenience
     psal_vals = b[psal_var].values.flatten()
     salinometer_vals = b[salinometer_var].values.flatten()
-    sample_nums = b[sample_number_var].values.flatten()
+    sample_nums = b[SAL_SAMPLE_NUMBER_var].values.flatten()
     pres_vals = b['PRES'].values.flatten()
 
     # Calculate salinity difference and stats
@@ -534,3 +693,71 @@ def plot_by_sample(ds, psal_var='PSAL1', salinometer_var='PSAL_LAB',
     button_exit = widgets.Button(description="Close", layout=widgets.Layout(width='200px'))
     button_exit.on_click(close_everything)
     display(button_exit)
+
+
+def plot_scatter(ds, psal_var='PSAL1', salinometer_var='PSAL_LAB',
+                    SAL_SAMPLE_NUMBER_var='SAL_SAMPLE_NUMBER', min_pres=0):
+    
+
+    if psal_var is None:
+        for default_var in ['PSAL1', 'PSAL', 'PSAL2']:
+            if default_var in ds:
+                psal_var = default_var
+                break
+        else:
+            raise ValueError("No PSAL variable found. Specify `psal_var` explicitly.")
+
+    if salinometer_var not in ds:
+        raise ValueError(f"Salinometer variable '{salinometer_var}' not found in dataset.")
+
+    if 'PRES' not in ds:
+        raise ValueError("Pressure variable 'PRES' not found in dataset.")
+
+    # Filter to deep samples
+    ds_deep = ds.where(ds.PRES > min_pres)
+
+
+
+    fig, ax = plt.subplots( figsize = (4, 4))
+    ax.set_aspect('equal')
+    ax.plot(ds_deep[psal_var], ds_deep[salinometer_var], '.')
+    
+    # Grab some extent parameters
+    xl = ax.get_xlim()
+    yl = ax.get_ylim()
+    min_range = min([xl[0], yl[0]])
+    max_range = max([xl[1], yl[1]])
+
+    # Plot a 1:1 line
+    ax.plot([min_range, max_range], [min_range, max_range], 'k', lw = 0.5, zorder = 0)
+    ax.grid()
+
+    # Set equal data range
+    ax.set_xlim(min_range, max_range)
+    ax.set_ylim(min_range, max_range)
+
+    # Set equal ticks and rotate x-ticks
+    ax.set_xticks(ax.get_yticks())
+    plt.xticks(rotation=90)
+
+    # Set axis labels
+    ax.set_xlabel(psal_var)
+    ax.set_ylabel(salinometer_var)
+
+    # Calculate and print correlation 
+    corr = xr.corr(ds_deep[psal_var], ds_deep[salinometer_var]).data
+    ax.text(
+        0.02, 0.96,          # x, y in axes coordinates
+        f'Correlation: {corr:.3f}',          # the text
+        transform=ax.transAxes, 
+        ha="left", va="top"  # align to the corner
+    )
+
+    if min_pres>0:
+        ax.set_title(f'Samples from >{min_pres} dbar')
+
+    plt.tight_layout()
+
+    # Set equal data range again..
+    ax.set_xlim(min_range, max_range)
+    ax.set_ylim(min_range, max_range)
