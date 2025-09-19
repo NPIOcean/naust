@@ -516,7 +516,7 @@ def plot_salinity_diff_histogram(
     salinometer_var: str = "PSAL_LAB",
     min_pres: float = 500,
     N: int = 20,
-    figsize: tuple = (10, 3.5),
+    figsize: tuple = (4, 3.5),
 ):
     """
     Plot a histogram of salinity differences between a CTD variable and salinometer readings.
@@ -584,14 +584,28 @@ def plot_salinity_diff_histogram(
 
     # Labels and title
     ax.set_xlabel(f"{psal_var} - {salinometer_var}")
-    ax.set_ylabel("Frequency")
-    ax.set_title(f"{psal_var}: Salinity difference at pressure > {min_pres} dbar (n={count})")
+    ax.set_ylabel("# SAMPLES")
+    ax.set_title(f"{psal_var}: Salinity difference ",
+                fontsize = 11)
+    
     ax.grid(True)
 
+
+    ax.text(1.001, 0.96, f'n={count}',
+            rotation = -90, color = 'b', transform=ax.transAxes, 
+            fontweight = 'bold', ha="left", va="top")
+    if min_pres > 0:
+        pres_text = f'PRES > {min_pres} dbar'
+    else:
+        pres_text = 'All samples'
+        
+    ax.text(1.001, 0, pres_text,
+        rotation = -90, color = 'gray', transform=ax.transAxes, 
+        fontweight = 'normal', ha="left", va="bottom")
     # Dummy handle for standard deviation in legend
     std_handle = mlines.Line2D([], [], color="none", label=f"Std = {diff_std:.4f}")
-    ax.legend(handles=[mean_line, median_line, std_handle], loc=1, bbox_to_anchor=(1.3, 0.6))
-
+    ax.legend(handles=[mean_line, median_line, std_handle], fontsize = 9,)
+#              bbox_to_anchor=(0.3, 0.95), loc=1,)
     plt.tight_layout()
 
     # Jupyter interactive close button
@@ -726,7 +740,7 @@ def plot_by_sample(
     ax2.axhline(0, color="k", ls="--")
     ax2.axhline(Sdiff_mean, color="tab:blue", lw=1.6, alpha=0.75, ls=":",
                 label=f"Mean = {Sdiff_mean:.2e}")
-    ax2.set_xlabel("FREQUENCY")
+    ax2.set_xlabel("# SAMPLES")
     ax2.set_ylabel(f"{psal_var} - salinometer S")
     ax2.grid(True)
     ax2.legend(loc=0, bbox_to_anchor=(1, 1.2), fontsize=9)
@@ -798,7 +812,8 @@ def plot_scatter(
     xl, yl = ax.get_xlim(), ax.get_ylim()
     min_range = min(xl[0], yl[0])
     max_range = max(xl[1], yl[1])
-    ax.plot([min_range, max_range], [min_range, max_range], 'k', lw=0.5, zorder=0)
+    ax.plot([min_range, max_range], [min_range, max_range], 
+            'k', dashes = (5, 5), lw=0.5, zorder=0, label = '1:1')
     ax.set_xlim(min_range, max_range)
     ax.set_ylim(min_range, max_range)
     ax.set_xticks(ax.get_yticks())
@@ -818,4 +833,6 @@ def plot_scatter(
     if min_pres > 0:
         ax.set_title(f'Samples from >{min_pres} dbar')
 
+    ax.legend(fontsize = 10)
+    ax.grid()
     plt.tight_layout()
