@@ -515,7 +515,8 @@ def plot_salinity_diff_histogram(
     psal_var: str | None = None,
     salinometer_var: str = "PSAL_LAB",
     min_pres: float = 500,
-    N: int = 20,
+    x_range: bool | tuple = (-0.012, 0.012),
+    N: int = 24,
     figsize: tuple = (4, 3.5),
 ):
     """
@@ -531,7 +532,8 @@ def plot_salinity_diff_histogram(
             If None, the function will auto-detect a suitable variable.
         salinometer_var (str, default 'PSAL_LAB'): Name of the salinometer salinity variable.
         min_pres (float, default 500): Minimum pressure to include in the comparison.
-        N (int, default 20): Number of bins in the histogram.
+        x_range (tuple or None, default (-0.012, 0.012)): The lower and upper range of the bins.
+        N (int, default 24): Number of bins in the histogram.
         figsize (tuple, default (10, 3.5)): Size of the figure in inches.
 
     Raises:
@@ -572,27 +574,30 @@ def plot_salinity_diff_histogram(
 
     # Create plot
     fig, ax = plt.subplots(figsize=figsize)
-    ax.hist(valid.values.flatten(), bins=N, color="steelblue", alpha=0.7)
+    ax.hist(valid.values.flatten(), range = x_range, bins=N, 
+            color="steelblue", alpha=0.7, zorder = 2,)
+    # Plot outline as line for emphasis
+    ax.hist(valid.values.flatten(), range = x_range, bins=N, 
+        color="k", alpha=0.7, zorder = 2,
+       histtype = 'step', lw = 0.6)
     ax.yaxis.set_major_locator(MaxNLocator(integer=True))
 
     # Lines for mean, median, and zero
-    ax.axvline(0, color="k", ls="--", lw=1)
-    mean_line = ax.axvline(diff_mean, color="tab:red", dashes=(5, 3), lw=1,
-                            label=f"Mean = {diff_mean:.4f}")
-    median_line = ax.axvline(diff_median, color="tab:red", ls=":", lw=1.5,
-                              label=f"Median = {diff_median:.4f}")
+    ax.axvline(0, color="k", ls=":", lw=0.7)
+    mean_line = ax.axvline(diff_mean, color="tab:orange", dashes=(5, 3), lw=1.5,
+                            label=f"Mean:\n{diff_mean:.4f}", zorder = 2)
+    median_line = ax.axvline(diff_median, color="tab:orange", ls=":", lw=2,
+                              label=f"Median:\n{diff_median:.4f}", zorder = 2)
 
     # Labels and title
     ax.set_xlabel(f"{psal_var} - {salinometer_var}")
     ax.set_ylabel("# SAMPLES")
     ax.set_title(f"{psal_var}: Salinity difference ",
-                fontsize = 11)
+                fontsize = 9.5)
     
-    ax.grid(True)
-
 
     ax.text(1.001, 0.96, f'n={count}',
-            rotation = -90, color = 'b', transform=ax.transAxes, 
+            rotation = -90, color = 'steelblue', transform=ax.transAxes, 
             fontweight = 'bold', ha="left", va="top")
     if min_pres > 0:
         pres_text = f'PRES > {min_pres} dbar'
@@ -602,11 +607,19 @@ def plot_salinity_diff_histogram(
     ax.text(1.001, 0, pres_text,
         rotation = -90, color = 'gray', transform=ax.transAxes, 
         fontweight = 'normal', ha="left", va="bottom")
+   
     # Dummy handle for standard deviation in legend
-    std_handle = mlines.Line2D([], [], color="none", label=f"Std = {diff_std:.4f}")
-    ax.legend(handles=[mean_line, median_line, std_handle], fontsize = 9,)
-#              bbox_to_anchor=(0.3, 0.95), loc=1,)
+    std_handle = mlines.Line2D([], [], color="none", label=f"Std=\n{diff_std:.4f}")
+
+    # Shade plus/minus 0.003
+    shade = ax.axvspan(-0.003, 0.003, color='tab:green', alpha=0.15, zorder = 0.5, label = '±0.003')
+
+    # Legend   
+    leg = ax.legend(handles=[mean_line, median_line, std_handle, shade], fontsize = 8.5,
+                   handlelength = 0.9)
+    
     plt.tight_layout()
+    ax.grid(True, zorder = 0)
 
     # Jupyter interactive close button
     try:
@@ -620,6 +633,7 @@ def plot_salinity_diff_histogram(
         button.on_click(close_fig)
     except Exception:
         pass
+        
 
 def plot_by_sample(
     ds: xr.Dataset,
@@ -801,7 +815,7 @@ def plot_scatter(
             raise ValueError(f"Dataset missing required variable: {var}")
 
     # Filter by minimum pressure
-    ds_deep = ds.where(ds.PRES > min_pres)
+    ds_deep = ds.where(ds.PRES > min_pres, drop = True)
 
     # Create scatter plot
     fig, ax = plt.subplots(figsize=(4, 4))
@@ -833,6 +847,10 @@ def plot_scatter(
     if min_pres > 0:
         ax.set_title(f'Samples from >{min_pres} dbar')
 
+    ax.text(1.001, 0.96, f'n={len(ds_deep[psal_var])}',
+            rotation = -90, color = 'steelblue', transform=ax.transAxes, 
+            fontweight = 'bold', ha="left", va="top")
+    
     ax.legend(fontsize = 10)
     ax.grid()
     plt.tight_layout()
