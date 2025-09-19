@@ -21,9 +21,3 @@ ____
 ____
 
 Maintained by the Oceanography section at NPI.
-____
-
-**STATUS**
-
-- *17.06.25*: Added a salinity QC module.
-- *09.04.25*: Initialized. Planning to build a quick loading module for dealing with Fram Strait bottle data.
