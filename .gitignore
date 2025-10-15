@@ -1,10 +1,12 @@
 documents/graphics/naust_graphic_inkskape.svg
 development/
+dist/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
+*.pyc
 
 
 # Jupyter Notebook
