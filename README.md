@@ -14,10 +14,12 @@ ____
 
 **USAGE EXAMPLES**
 
-
-
 - [QC of CTD salinity against salinometer values](notebooks/examples/salts/Salt_QC_example.ipynb)
 
 ____
 
 Maintained by the Oceanography section at NPI.
+
+____
+
+Most recent release: v0.1.1
