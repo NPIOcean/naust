@@ -25,5 +25,9 @@ ____
 Most recent release: *v0.1.2*
 
 
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.17356479.svg)](https://doi.org/10.5281/zenodo.17356479)
+
+
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.17356730.svg)](https://doi.org/10.5281/zenodo.17356730)
+
+
 
