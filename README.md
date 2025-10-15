@@ -22,4 +22,8 @@ Maintained by the Oceanography section at NPI.
 
 ____
 
-Most recent release: v0.1.1
+Most recent release: *v0.1.1*
+
+
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.17356479.svg)](https://doi.org/10.5281/zenodo.17356479)
+
