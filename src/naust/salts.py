@@ -335,6 +335,30 @@ def merge_salts_sheet_and_log(
     if missing_after_merge:
         raise ValueError(f"Columns missing after merge: {missing_after_merge}")
 
+
+    # Check for non-numeric STATION values in the log
+    non_numeric_stations = df_merged["STATION"][
+        pd.to_numeric(df_merged["STATION"], errors='coerce').isna()
+    ].unique()
+    if len(non_numeric_stations) > 0:
+        raise ValueError(
+            f"Non-numeric STATION value(s) found in sample log: {list(non_numeric_stations)}. "
+            f"### Check the sample log sheet for typos or unexpected station names ###"
+        )
+
+    # Check for duplicate (STATION, NISKIN_NUMBER) combinations
+    duplicates = df_merged[df_merged.duplicated(subset=['STATION', 'NISKIN_NUMBER'], keep=False)]
+    if not duplicates.empty:
+        raise ValueError(
+            f"Duplicate (STATION, NISKIN_NUMBER) combinations found in sample log:\n"
+            f"{duplicates[['STATION', 'NISKIN_NUMBER']].drop_duplicates().to_string()}\n"
+            f"\n### Check the sample log sheet (.xlsx) for typos or repeated entries ###"
+        )
+
+    # Set multi-index and convert to xarray Dataset
+    df_merged = df_merged.set_index(['STATION', 'NISKIN_NUMBER'])
+
+
     # Set multi-index and convert to xarray Dataset
     df_merged = df_merged.set_index(['STATION', 'NISKIN_NUMBER'])
     ds_merged = xr.Dataset.from_dataframe(df_merged)
