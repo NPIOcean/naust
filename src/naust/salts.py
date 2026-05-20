@@ -261,13 +261,19 @@ def read_salts_log(xlsx_file: str) -> xr.Dataset:
             df_sal = read_salts_log_fs_style(xlsx_file)
         except:
             raise Exception(f'Unable to parse {xlsx_file}')
-    
+        
     try:
         df_sal["STATION"] = df_sal["STATION"].astype(str).str.lstrip("0").astype(int)
-    except:
-        warnings.warn('Unable to convert all values of "station" in the .btl files -'
-                      ' probably non-numerical values. Correct or proceed with caution.',
-                      UserWarning)
+    except Exception:
+        non_numeric = df_sal["STATION"][
+            pd.to_numeric(df_sal["STATION"], errors='coerce').isna()
+        ].unique()
+        warnings.warn(
+            f'Unable to convert all STATION values to integers in the sample log. '
+            f'Problematic values: {list(non_numeric)}. '
+            f'Check "{Path(xlsx_file).name}" for typos or unexpected station names.',
+            UserWarning
+        )
 
     return df_sal
 
@@ -379,6 +385,8 @@ def merge_all_salts_with_btl(
         NISKIN_NUMBER=ds_btl["NISKIN_NUMBER"].astype(int)
         )
     
+
+
     # Convert STATION to int (strip leading zeros)
     try:
         ds_btl["STATION"] = ds_btl["STATION"].astype(str).str.lstrip("0").astype(int)
@@ -391,6 +399,37 @@ def merge_all_salts_with_btl(
 
     # Copy to avoid modifying in place
     ds_combined_full = ds_btl.copy()
+
+
+    # Pre-flight check: look for non-numeric STATION values in BTL files
+    btl_stations_raw = ds_combined_full["STATION"].values
+    non_numeric_btl = [str(s) for s in btl_stations_raw if not str(s).lstrip('0').lstrip('-').isdigit()]    
+    if non_numeric_btl:
+        raise ValueError(
+            f"Non-numeric STATION value(s) found in BTL files: {non_numeric_btl}. "
+            f"Check your .btl file headers for typos."
+        )
+
+    # Pre-flight check: warn if STATION or NISKIN_NUMBER values don't overlap
+    btl_stations = set(int(s) for s in btl_stations_raw)
+    sal_stations = set(int(s) for s in ds_salts["STATION"].values)
+    if not btl_stations & sal_stations:
+        raise ValueError(
+            f"No common STATION values between BTL files and sample log. "
+            f"BTL stations: {sorted(btl_stations)}, "
+            f"Sample log stations: {sorted(sal_stations)}. "
+            f"Check for formatting issues in your .btl file headers and sample log sheet."
+        )
+
+    btl_niskins = set(ds_combined_full["NISKIN_NUMBER"].values)
+    sal_niskins = set(ds_salts["NISKIN_NUMBER"].values)
+    if not btl_niskins & sal_niskins:
+        raise ValueError(
+            f"No common NISKIN_NUMBER values between BTL files and sample log. "
+            f"BTL niskins: {sorted(btl_niskins)}, "
+            f"Sample log niskins: {sorted(sal_niskins)}. "
+            f"Check for formatting issues in your sample log sheet."
+        )
 
     # Update/add variables from ds_salts
     ds_combined_full.update(ds_salts)
