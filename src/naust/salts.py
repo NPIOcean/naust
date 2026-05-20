@@ -375,8 +375,10 @@ def merge_all_salts_with_btl(
         ds_btl = xr_funcs.swap_var_coord(ds_btl, 'TIME', 'STATION')
 
     # Convert NISKIN_NUMBER to int
-    ds_btl["NISKIN_NUMBER"] = ds_btl["NISKIN_NUMBER"].astype(int)
-
+    ds_btl = ds_btl.assign_coords(
+        NISKIN_NUMBER=ds_btl["NISKIN_NUMBER"].astype(int)
+        )
+    
     # Convert STATION to int (strip leading zeros)
     try:
         ds_btl["STATION"] = ds_btl["STATION"].astype(str).str.lstrip("0").astype(int)
